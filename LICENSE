@@ -1,0 +1,55 @@
+MIT License
+
+Copyright (c) 2026 Tea Kauppinen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+==============================================================================
+Derived work
+==============================================================================
+
+Parts of this project are derived from the following MIT-licensed works. Their
+copyright notices are retained here as that licence requires; the permission
+notice and warranty disclaimer above apply to them on identical terms.
+
+process-stutterjump -- Copyright (c) 2025 sevendc
+  https://github.com/sevendc/process-stutterjump
+  demo.html's WebGL bootstrap (the `with(g)` two-character aliasing of GL
+  methods, the fullscreen-triangle setup), the `//*--` shader fence and the
+  `// -- dev start/end` marker convention. build.js is a rewrite but follows
+  the same extract/minify/pack pipeline.
+
+Loertsy -- Copyright (c) 2019-2023 Timo Pitkänen
+           Copyright (c) 2024-2026 Timo Pitkänen, Perttu Lamminmäki
+  https://gitlab.com/bits_lab/loertsy
+  The compeko backend in build.js: the `<svg onload>` bootstrap that re-fetches
+  the page, slices off the header and inflates the appended deflate stream,
+  ported from tools/combine_and_pack.py. Also the source of the patched Shader
+  Minifier build in tools/shader-minifier/.
+
+compeko.js -- Copyright (c) 2022-2024 0b5vr
+  https://gist.github.com/0b5vr/09ee96ca2efbe5bf9d64dad7220e923b
+  The original DecompressionStream self-extraction technique that Loertsy's
+  packer, and therefore critter's compeko backend, is based on.
+
+
+Redistributed binaries in tools/shader-minifier/ are covered separately by
+tools/shader-minifier/THIRD-PARTY-NOTICES (Apache-2.0, MIT, BSD-2-Clause).
+Build-time npm dependencies are not redistributed and carry their own licences.
