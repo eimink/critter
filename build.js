@@ -238,12 +238,26 @@ async function main() {
   const usesW = shader.includes('${w}'), usesH = shader.includes('${h}');
   shader = shader.replaceAll('${w}', W_TOKEN).replaceAll('${h}', H_TOKEN);
 
+  // #version 300 es lives outside the //*-- fence in demo.html (real WebGL2
+  // requires it as the literal first line, before even a comment -- the
+  // fence marker itself would violate that in dev mode). Both validators
+  // below still need it in scope to know this is ES 300 (without it,
+  // glslangValidator assumes an old default version and rejects the
+  // fragment shader's `out` declaration), so prepend it here and strip it
+  // back off before splicing the minified result back into the fence.
+  const VERSION_RE = /^#version\s+300\s+es\s*\n/;
+  shader = '#version 300 es\n' + shader;
+
   // validate before and after: "before" blames your source, "after" blames the minifier
   const preOk = validateGlsl(shader, 'source');
   const sm = await minifyShader(shader, log);
   validateGlsl(sm.code, `minified (${sm.tool})`);
   log(preOk === null ? '  ! glslangValidator not found -- shader not compile-checked' : '  shader compiles (glslang)');
   let shaderMin = sm.code;
+  if (!VERSION_RE.test(shaderMin)) {
+    fail(`minifier (${sm.tool}) did not keep #version 300 es as the shader's first line -- can't safely split it back out`);
+  }
+  shaderMin = shaderMin.replace(VERSION_RE, '');
   if (usesW) shaderMin = shaderMin.replaceAll(W_TOKEN, '${w}');
   if (usesH) shaderMin = shaderMin.replaceAll(H_TOKEN, '${h}');
   log(`  shader minified ${shader.length}b -> ${shaderMin.length}b (${sm.tool})`);

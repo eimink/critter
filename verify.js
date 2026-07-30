@@ -87,7 +87,10 @@ function smokeTest(code) {
 
   const shaderSrc = calls.filter(([n]) => n === 'shaderSource').map(([, a]) => a[1]);
   if (shaderSrc.length !== 2) bad(`expected 2 shaderSource calls, got ${shaderSrc.length}`);
-  if (!/gl_FragColor/.test(shaderSrc[0])) bad('fragment shader missing gl_FragColor');
+  if (!/#version 300 es/.test(shaderSrc[0])) bad('fragment shader missing #version 300 es (WebGL2/GLSL ES 300)');
+  // ES 300 has no gl_FragColor -- it needs a user-declared `out` written to instead
+  if (/gl_FragColor/.test(shaderSrc[0])) bad('fragment shader uses gl_FragColor, which does not exist in GLSL ES 300');
+  if (!/out\s+vec4\s+\w+;/.test(shaderSrc[0])) bad('fragment shader missing an out vec4 declaration');
   if (/\/\/\*--/.test(shaderSrc[0])) bad('shader fence //*-- survived into the build');
   if (!/gl_Position/.test(shaderSrc[1])) bad('vertex shader missing gl_Position');
 

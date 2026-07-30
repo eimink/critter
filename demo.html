@@ -8,24 +8,42 @@ c.style.cssText="position:fixed;left:0;top:0;width:100%;height:100%"
 C.style.cssText="font:12vw monospace;color:#fff;text-align:center"
 // `let` is required: undeclared x resolves to SVGSVGElement.x (readonly) when
 // the payload is eval'd from an inline handler, silently breaking every alias
-for(let x in (g=c.getContext("webgl")))g[x[(t=A=0)]+x[6]]=g[x]
-with(g){p=cP(g.c=compileShader)
-sS(s=cS(a=35632),`//*--
+for(let x in (g=c.getContext("webgl2")))g[x[(t=A=0)]+x[6]]=g[x]
+with(g){
+// WebGL2 adds enough new methods that six of our x[0]+x[6] short names now
+// collide with something added in WebGL2 (createSampler vs createShader,
+// getQuery(Parameter) vs getAttribLocation, bindBufferBase/Range vs
+// bindBuffer, getBufferSubData/getUniformIndices/getUniformBlockIndex vs
+// getUniformLocation, drawArraysInstanced vs drawArrays, and several
+// vertexAttribI*/Divisor variants piling onto an already-crowded vA group).
+// Whichever collider enumerates last in a given browser wins the alias, so
+// don't gamble on that order -- force these explicitly, same as compileShader
+// already was.
+p=cP(g.c=compileShader,g.cS=createShader,g.gr=getAttribLocation,g.bf=bindBuffer,g.gf=getUniformLocation,g.dr=drawArrays,g.vA=vertexAttribPointer)
+sS(s=cS(a=35632),"#version 300 es\n"+`//*--
 precision highp float;
 #define V vec3
+// fake rotation matrix (not orthonormal, just enough shear to break symmetry
+// in the glow field below) -- from the shadertoy "happy accident" this is
+// ported from; the 11/33 offsets are its magic, not ours
+#define r(a) mat2(cos(a-vec4(0,11,33,0)))
 
 uniform vec2 T;   // T.x = seconds since start, T.y = birb tick
 uniform vec2 R;   // resolution
+out vec4 FragColor;
 
 const float E=0.001;
-const int STEPS=64;
-const float FAR=40.0;
+const int STEPS=80;
+const float FAR=60.0;
+// ticks in one full song loop (songSamples/spt = 604416/787 = 768 for the
+// current track), so every periodic motion below can be expressed as a
+// whole number of cycles per loop and land back exactly where it started
+// when the audio repeats. 768/24 = 32 beats/loop too -- re-derive both this
+// and pulse()'s divisor from song.js together whenever the track changes.
+const float TICKS_PER_LOOP=768.0;
 
-V glow=V(0.0);
-
-// caller passes cos/sin: the per-step angle is constant for the whole frame
-void rot(inout vec2 p, float ca, float sa){
-    p=ca*p+sa*vec2(p.y,-p.x);
+void rot(inout vec2 p, float a){
+    p=cos(a)*p+sin(a)*vec2(p.y,-p.x);
 }
 
 float box(V position, V dimensions){
@@ -34,51 +52,40 @@ float box(V position, V dimensions){
 }
 
 vec2 opU(vec2 d1, vec2 d2){
-    return (d1.x<d2.x) ? d1 : d2;
+    return d1.x<d2.x ? d1 : d2;
+}
+
+// beat pulse from the tick counter -- shared with the box scale below.
+// this song: tpr=6, kick every 4 rows -> 24 ticks/beat (checks out against
+// its bpm=140: 24*787 samples / 44100 = 0.4283s = 140.1 bpm). Re-derive this
+// divisor from song.js whenever the track changes -- it's not derivable from
+// T.y alone.
+float pulse(){
+    return exp(-fract(T.y/24.0)*4.);
 }
 
 vec2 scene(V p){
-    float fGlobalTime=T.x;
-    V pp=p, ppp=p;
-    vec2 res=vec2(1.,0.), res2=vec2(1.,0.), res3=vec2(1.,0.);
-    float ca=cos(fGlobalTime*0.01), sa=sin(fGlobalTime*0.01);
-    for(int ii=0;ii<16;ii++){
-        float i=float(ii);
-        // all nine boxes reuse only these four trig values
-        float cp=cos(fGlobalTime+i), sp=sin(fGlobalTime+i);
-        float cm=cos(fGlobalTime-i), sm=sin(fGlobalTime-i);
+    float pl=1.0+pulse()*.15;
+    float lp=fract(T.y/TICKS_PER_LOOP);   // 0->1 once per song loop, exactly
 
-        rot(pp.xz,ca,sa);
-        rot(pp.zy,ca,sa);
-        float a=box(pp+V(cp,sm,15.0-i),V(1.0));
-        float b=box(pp+V(1.+sp,1.+sm,14.0-i),V(1.0));
-        float c=box(pp+V(2.+cp,2.+cm,13.0-i),V(1.0));
-        res=opU(res,vec2(min(a,min(b,c)),1.));
-
-        rot(ppp.zy,ca,sa);
-        rot(ppp.zx,ca,sa);
-        float d=box(ppp+V(cp,6.+sm,12.0-i),V(1.0));
-        float e=box(ppp+V(1.+sp,7.+sm,11.0-i),V(1.0));
-        float f=box(ppp+V(2.+cp,8.+cm,10.0-i),V(1.0));
-        res2=opU(res2,vec2(min(d,min(e,f)),2.));
-
-        rot(p.zy,ca,sa);
-        rot(p.xz,ca,sa);
-        float g=box(p+V(cp,12.+sm,9.0-i),V(1.0));
-        float hh=box(p+V(1.+sp,13.+sm,8.0-i),V(1.0));
-        float j=box(p+V(2.+cp,14.+cm,7.0-i),V(1.0));
-        res3=opU(res3,vec2(min(g,min(hh,j)),3.));
+    // three small cubes orbiting a common center, hovering at a fixed
+    // distance from the camera. Angles are lp*tau*N (whole N) instead of
+    // T.x*speed so the motion completes a whole number of turns per loop
+    // and lines back up with itself when the song repeats.
+    V rel=p-V(0.0,0.0,3.5);
+    vec2 res=vec2(1e5,0.0);
+    for(int i=0;i<3;i++){
+        float fi=float(i);
+        float ang=lp*6.283185307*2.0+fi*2.0943951;   // 2 orbits/loop, 2pi/3 apart
+        V pi=rel-V(cos(ang),sin(ang),0.0)*.3;
+        rot(pi.xy,lp*6.283185307*(3.0+fi*2.0));       // 3/5/7 spins per loop
+        res=opU(res,vec2(box(pi,V(.2*pl)),fi+1.0));
     }
-    // beat pulse from the tick counter brightens the near ring on top of the shadertoy glow term
-    float pulse=exp(-fract(T.y*.25)*4.);
-    glow+=V(.85,.08,.45)*(0.0012+pulse*.002)/abs(res.x)+0.0001;
-    glow+=V(.02,.08,.45)*0.005/abs(res2.x)+0.001;
-    glow+=V(.4,.08,.4)*0.002/abs(res3.x)+0.0001;
-    return opU(res3,opU(res2,res));
+    return res;
 }
 
 V calcNormal(V pos){
-    vec2 e=vec2(0.00001,0.0);
+    vec2 e=vec2(0.001,0.0);
     return normalize(V(scene(pos+e.xyy).x-scene(pos-e.xyy).x,
                         scene(pos+e.yxy).x-scene(pos-e.yxy).x,
                         scene(pos+e.yyx).x-scene(pos-e.yyx).x));
@@ -100,38 +107,60 @@ vec2 march(V ro, V rd, out V pos){
     return vec2(t,id);
 }
 
-V colorize(float id, V nrm, V ld){
-    V col=V(0.0);
-    if(id==1.0) col=V(1.0,.2,.8)+clamp(dot(nrm,ld),0.0,1.0);
-    else if(id==2.0) col=V(0.2,0.2,1.0)+clamp(dot(nrm,ld),0.0,1.0);
-    else if(id==3.0) col=V(0.4,0.1,0.4)+clamp(dot(nrm,ld),0.0,.5);
-    return col;
-}
-
 void main(){
-    float fGlobalTime=T.x;
-    vec2 uv=gl_FragCoord.xy/R;
-    vec2 uvv=-1.0+2.0*uv;
-    uvv.x*=R.x/R.y;
+    vec2 uv=(gl_FragCoord.xy-.5*R)/R.y;
+    V rd=normalize(V(uv,1.0));
 
-    V rayOrigin=V(sin(fGlobalTime*.5)*10.,sin(fGlobalTime*2.)*2.-5.0,cos(fGlobalTime*.5)*20.-10.0);
-    V lookAt=V(0.0,-5.0,0.0);
-
-    V z=normalize(lookAt-rayOrigin);
-    V x=normalize(cross(z,V(0.0,1.0,0.0)));
-    V y=normalize(cross(x,z));
-
-    V rayDirection=normalize(mat3(x,y,z)*V(uvv,radians(60.00)));
-    V lightDirection=-rayDirection;
-
-    V col=V(0.0);
     V hitPos;
-    vec2 hit=march(rayOrigin,rayDirection,hitPos);
-    if(hit.x<FAR) col=colorize(hit.y,calcNormal(hitPos),lightDirection);
+    vec2 hit=march(V(0.0),rd,hitPos);
 
-    col=col+glow*0.01;
-    col=smoothstep(0.0,1.0,col);
-    gl_FragColor=vec4(col,1.);
+    // iridescent glow tunnel behind the cubes. Started as a ported shadertoy
+    // "happy accident" (layered sine ripples folded through a fake rotation
+    // matrix, tonemapped through tanh); made it ours by wiring the fractal
+    // fold, the tunnel path, and the color cycling all to the birb beat
+    // pulse, and by locking its forward scroll to the song's loop length
+    // instead of raw seconds so it closes cleanly when the audio repeats.
+    float pu=pulse();
+    float lp=fract(T.y/TICKS_PER_LOOP);
+    float scroll=lp*8.0*3.14159265;   // 8 half-cycles/loop -- a multiple of
+                                      // pi, a safe wrap point for every
+                                      // harmonic in the fold below
+    V pos=V(0.0),warp;
+    float iter=0.,dist=0.,de=1.,freq;
+    vec4 glow=vec4(0.0);
+
+    for(;iter<99.&&de>1e-4;iter+=1.0){
+        glow+=(1.0+sin(3.0*length(pos.xy*3.0)+vec4(2,1,0,0)+pu*1.5))/190.0;
+
+        dist+=de*.4;
+        pos=V(uv*dist,dist);
+        pos.z+=scroll;
+        // the tunnel path breathes wider on the beat
+        de=2.0-length(pos.xy-vec2(sin(pos.z*.3),cos(pos.z*.3))*(.3+pu*.2));
+
+        float flip=1.0;
+        for(freq=2.0;freq<3e2;freq+=freq){
+            warp=pos*freq;
+            warp.xz*=r(freq+pu*1.2);   // beat kicks the fold's shear
+            de-=flip*abs(dot(sin(warp),V(1.0)))/(freq*1.2);
+            flip*=-.75;
+        }
+    }
+
+    glow+=12.0/iter;
+    glow=0.2/tanh(glow*glow)/vec4(3,2,1,0)*6.0/dist;
+
+    V col=glow.rgb;
+    if(hit.x<dist){
+        V n=calcNormal(hitPos);
+        V ld=normalize(V(.5,.8,-.4));
+        float diff=clamp(dot(n,ld),0.0,1.0)+.15;
+        if(hit.y<1.5) col=V(1.0,.2,.8)*diff;
+        else if(hit.y<2.5) col=V(.2,.2,1.0)*diff;
+        else col=V(.95,.6,.2)*diff;
+    }
+
+    FragColor=vec4(col,1.0);
 }//*--`)
 c(s)
 // -- dev start
@@ -141,7 +170,7 @@ if(!g.getShaderParameter(s,g.COMPILE_STATUS)){
 }
 // -- dev end
 aS(p,s)
-sS(s=cS(++a),"attribute vec2 p;void main(){gl_Position=vec4(p,0,1);}")
+sS(s=cS(++a),"#version 300 es\nin vec2 p;void main(){gl_Position=vec4(p,0,1);}")
 c(s)
 aS(p,s)
 lo(p)
