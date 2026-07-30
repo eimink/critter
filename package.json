@@ -1,0 +1,22 @@
+{
+  "name": "critter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "4k WebGL demo framework with birb synth",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node build.js demo.html",
+    "dev": "node build.js demo.html --fast",
+    "verify": "node verify.js build/payload.js",
+    "check": "node build.js demo.html --fast && node verify.js build/payload.js"
+  },
+  "dependencies": {
+    "roadroller": "^2.1.0",
+    "terser": "^5.49.0",
+    "uglify-js": "^3.19.3",
+    "webpack-glsl-minify": "^1.5.0"
+  }
+}

@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+
+# build intermediates: shader.glsl, shader.glslmin, minified.js, payload.js
+build/
+
+# packed output -- build.js writes <input-name>-build.html, so glob it
+*-build.html
+
+# compo/upload archives
+*.zip
+
+# local renders and captures (reference audio, demo recordings)
+*.wav
+*.mp4
+*.mov
+
+# macOS
+.DS_Store
+
+# editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# npm noise
+npm-debug.log*
+yarn-error.log*
+.npm/
+
+# machine-local Claude Code settings (shared settings.json stays tracked)
+.claude/settings.local.json

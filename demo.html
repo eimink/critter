@@ -1,0 +1,96 @@
+<body onclick="A||I()"><p id=C>click</p><canvas id=c></canvas><script src="song.js"></script><script>
+c.width=w=innerWidth|0, c.height=h=innerHeight|0
+document.body.style.cssText="margin:0;background:#000;cursor:none"
+c.style.cssText="position:fixed;left:0;top:0;width:100%;height:100%"
+C.style.cssText="font:12vw monospace;color:#fff;text-align:center"
+for(x in (g=c.getContext("webgl")))g[x[(t=A=0)]+x[6]]=g[x]
+with(g){p=cP(g.c=compileShader)
+sS(s=cS(a=35632),`//*--
+precision highp float;
+#define V vec3
+
+uniform vec2 T;   // T.x = seconds since start, T.y = birb tick
+uniform vec2 R;   // resolution
+
+float h(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
+
+void main(){
+    vec2 uv=(gl_FragCoord.xy*2.-R)/R.y;
+    float T0=T.x;
+
+    // beat pulse from the tick counter
+    float pulse=exp(-fract(T.y*.25)*4.);
+
+    // polar warp
+    float r=length(uv), a=atan(uv.y,uv.x);
+    a+=T0*.2+pulse*.3;
+    r=log(r+.001);
+
+    // layered rings
+    float v=0.;
+    for(int i=0;i<4;i++){
+        float f=float(i)+1.;
+        v+=sin(r*6.*f-T0*1.5+a*3.)/f;
+    }
+    v=abs(v);
+
+    V col=mix(V(.05,.1,.25),V(1.,.5,.15),smoothstep(.1,.9,v));
+    col+=pulse*.35*V(.4,.6,1.);
+    col*=1.-r*.04;
+
+    // vignette + grain
+    col*=1.-.1*dot(uv,uv);
+    col+=(h(gl_FragCoord.xy+T0)-.5)*.04;
+
+    gl_FragColor=vec4(col,1.);
+}//*--`)
+c(s)
+// -- dev start
+if(!g.getShaderParameter(s,g.COMPILE_STATUS)){
+    console.log(g.getShaderInfoLog(s));
+    alert('shader compilation error: '+g.getShaderInfoLog(s));
+}
+// -- dev end
+aS(p,s)
+sS(s=cS(++a),"attribute vec2 p;void main(){gl_Position=vec4(p,0,1);}")
+c(s)
+aS(p,s)
+lo(p)
+ug(p)
+eV(e=gr(p,"p"))
+vA(e,2,5126,0,bf(d=34962,cB()),bD(d,new Float32Array([b=-1,b,b,3,3,b]),35044))
+uniform2f(gf(p,"R"),w,h)
+U=gf(p,"T")
+
+// starts on click: audio needs a gesture
+I=()=>{
+    C.remove();
+    A=new AudioContext({sampleRate:44100});
+
+    // renders the whole song offline, blocks briefly
+    m=birb(A);
+    q=A.createBuffer(1,m.T,44100);
+    q.getChannelData(0).set(m.o);
+    S=A.createBufferSource();
+    S.buffer=q;
+    S.connect(A.destination);
+    S.loop=true;
+    S.start();
+    D=A.currentTime;
+
+    // -- dev start
+    console.log('song '+(m.T/44100).toFixed(1)+'s, spt '+m.spt);
+    // -- dev end
+
+    F()
+}
+
+// seconds + birb tick to the shader
+F=()=>{
+    t=A.currentTime-D;
+    uniform2f(U,t,t*44100/m.spt);
+    dr(4,0,3);
+    requestAnimationFrame(F)
+}
+}
+</script>
