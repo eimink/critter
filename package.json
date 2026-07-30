@@ -14,6 +14,7 @@
     "check": "node build.js demo.html --fast && node verify.js build/payload.js"
   },
   "dependencies": {
+    "@gfx/zopfli": "^1.0.15",
     "roadroller": "^2.1.0",
     "terser": "^5.49.0",
     "uglify-js": "^3.19.3",

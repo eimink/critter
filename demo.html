@@ -1,9 +1,14 @@
 <body onclick="A||I()"><p id=C>click</p><canvas id=c></canvas><script src="song.js"></script><script>
-c.width=w=innerWidth|0, c.height=h=innerHeight|0
+// Q = render scale. CSS stretches the canvas to fill, so Q=2 renders quarter
+// the pixels and upscales. Drop to 1 for native once the shader is cheap enough.
+Q=2
+c.width=w=innerWidth/Q|0, c.height=h=innerHeight/Q|0
 document.body.style.cssText="margin:0;background:#000;cursor:none"
 c.style.cssText="position:fixed;left:0;top:0;width:100%;height:100%"
 C.style.cssText="font:12vw monospace;color:#fff;text-align:center"
-for(x in (g=c.getContext("webgl")))g[x[(t=A=0)]+x[6]]=g[x]
+// `let` is required: undeclared x resolves to SVGSVGElement.x (readonly) when
+// the payload is eval'd from an inline handler, silently breaking every alias
+for(let x in (g=c.getContext("webgl")))g[x[(t=A=0)]+x[6]]=g[x]
 with(g){p=cP(g.c=compileShader)
 sS(s=cS(a=35632),`//*--
 precision highp float;
@@ -18,16 +23,10 @@ const float FAR=40.0;
 
 V glow=V(0.0);
 
-void rot(inout vec2 p, float a){
-    p=cos(a)*p+sin(a)*vec2(p.y,-p.x);
+// caller passes cos/sin: the per-step angle is constant for the whole frame
+void rot(inout vec2 p, float ca, float sa){
+    p=ca*p+sa*vec2(p.y,-p.x);
 }
-
-struct MarchResult{
-    float id;
-    float t;
-    V p;
-    V n;
-};
 
 float box(V position, V dimensions){
     V b=abs(position)-dimensions;
@@ -42,28 +41,33 @@ vec2 scene(V p){
     float fGlobalTime=T.x;
     V pp=p, ppp=p;
     vec2 res=vec2(1.,0.), res2=vec2(1.,0.), res3=vec2(1.,0.);
-    for(int ii=0;ii<32;ii++){
+    float ca=cos(fGlobalTime*0.01), sa=sin(fGlobalTime*0.01);
+    for(int ii=0;ii<16;ii++){
         float i=float(ii);
-        rot(pp.xz,fGlobalTime*0.01);
-        rot(pp.zy,fGlobalTime*0.01);
-        float a=box(pp+V(cos(fGlobalTime+i),sin(fGlobalTime-i),15.0-i),V(1.0));
-        float b=box(pp+V(1.+sin(fGlobalTime+i),1.+sin(fGlobalTime-i),14.0-i),V(1.0));
-        float c=box(pp+V(2.+cos(fGlobalTime+i),2.+cos(fGlobalTime-i),13.0-i),V(1.0));
-        res=opU(res,opU(vec2(c,1.),opU(vec2(b,1.),vec2(a,1.))));
+        // all nine boxes reuse only these four trig values
+        float cp=cos(fGlobalTime+i), sp=sin(fGlobalTime+i);
+        float cm=cos(fGlobalTime-i), sm=sin(fGlobalTime-i);
 
-        rot(ppp.zy,fGlobalTime*0.01);
-        rot(ppp.zx,fGlobalTime*0.01);
-        float d=box(ppp+V(cos(fGlobalTime+i),6.+sin(fGlobalTime-i),12.0-i),V(1.0));
-        float e=box(ppp+V(1.+sin(fGlobalTime+i),7.+sin(fGlobalTime-i),11.0-i),V(1.0));
-        float f=box(ppp+V(2.+cos(fGlobalTime+i),8.+cos(fGlobalTime-i),10.0-i),V(1.0));
-        res2=opU(res2,opU(vec2(d,2.),opU(vec2(e,2.),vec2(f,2.))));
+        rot(pp.xz,ca,sa);
+        rot(pp.zy,ca,sa);
+        float a=box(pp+V(cp,sm,15.0-i),V(1.0));
+        float b=box(pp+V(1.+sp,1.+sm,14.0-i),V(1.0));
+        float c=box(pp+V(2.+cp,2.+cm,13.0-i),V(1.0));
+        res=opU(res,vec2(min(a,min(b,c)),1.));
 
-        rot(p.zy,fGlobalTime*0.01);
-        rot(p.xz,fGlobalTime*0.01);
-        float g=box(p+V(cos(fGlobalTime+i),12.+sin(fGlobalTime-i),9.0-i),V(1.0));
-        float hh=box(p+V(1.+sin(fGlobalTime+i),13.+sin(fGlobalTime-i),8.0-i),V(1.0));
-        float j=box(p+V(2.+cos(fGlobalTime+i),14.+cos(fGlobalTime-i),7.0-i),V(1.0));
-        res3=opU(res3,opU(vec2(j,3.),opU(vec2(hh,3.),vec2(g,3.))));
+        rot(ppp.zy,ca,sa);
+        rot(ppp.zx,ca,sa);
+        float d=box(ppp+V(cp,6.+sm,12.0-i),V(1.0));
+        float e=box(ppp+V(1.+sp,7.+sm,11.0-i),V(1.0));
+        float f=box(ppp+V(2.+cp,8.+cm,10.0-i),V(1.0));
+        res2=opU(res2,vec2(min(d,min(e,f)),2.));
+
+        rot(p.zy,ca,sa);
+        rot(p.xz,ca,sa);
+        float g=box(p+V(cp,12.+sm,9.0-i),V(1.0));
+        float hh=box(p+V(1.+sp,13.+sm,8.0-i),V(1.0));
+        float j=box(p+V(2.+cp,14.+cm,7.0-i),V(1.0));
+        res3=opU(res3,vec2(min(g,min(hh,j)),3.));
     }
     // beat pulse from the tick counter brightens the near ring on top of the shadertoy glow term
     float pulse=exp(-fract(T.y*.25)*4.);
@@ -80,30 +84,27 @@ V calcNormal(V pos){
                         scene(pos+e.yyx).x-scene(pos-e.yyx).x));
 }
 
-MarchResult march(V ro, V rd){
+// returns vec2(distance,id) and writes the hit position; no struct, because
+// Shader Minifier 1.5.1 will reuse a struct's type name for a local variable
+vec2 march(V ro, V rd, out V pos){
     float t=E;
     float id=0.0;
-    V position=ro;
+    pos=ro;
     for(int i=0;i<STEPS;i++){
-        vec2 d=scene(position);
+        vec2 d=scene(pos);
         t+=d.x;
         id=d.y;
-        position=ro+rd*t;
+        pos=ro+rd*t;
         if(d.x<E||t>FAR) break;
     }
-    MarchResult res;
-    res.t=t;
-    res.id=id;
-    res.p=position;
-    res.n=calcNormal(position);
-    return res;
+    return vec2(t,id);
 }
 
-V colorize(MarchResult m, V ld){
+V colorize(float id, V nrm, V ld){
     V col=V(0.0);
-    if(m.id==1.0) col=V(1.0,.2,.8)+clamp(dot(m.n,ld),0.0,1.0);
-    else if(m.id==2.0) col=V(0.2,0.2,1.0)+clamp(dot(m.n,ld),0.0,1.0);
-    else if(m.id==3.0) col=V(0.4,0.1,0.4)+clamp(dot(m.n,ld),0.0,.5);
+    if(id==1.0) col=V(1.0,.2,.8)+clamp(dot(nrm,ld),0.0,1.0);
+    else if(id==2.0) col=V(0.2,0.2,1.0)+clamp(dot(nrm,ld),0.0,1.0);
+    else if(id==3.0) col=V(0.4,0.1,0.4)+clamp(dot(nrm,ld),0.0,.5);
     return col;
 }
 
@@ -124,8 +125,9 @@ void main(){
     V lightDirection=-rayDirection;
 
     V col=V(0.0);
-    MarchResult t=march(rayOrigin,rayDirection);
-    if(t.t<FAR) col=colorize(t,lightDirection);
+    V hitPos;
+    vec2 hit=march(rayOrigin,rayDirection,hitPos);
+    if(hit.x<FAR) col=colorize(hit.y,calcNormal(hitPos),lightDirection);
 
     col=col+glow*0.01;
     col=smoothstep(0.0,1.0,col);

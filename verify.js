@@ -161,10 +161,31 @@ function smokeTest(code) {
   };
 }
 
-/** Never throws. */
+/*
+ * Compeko eval's the payload from an inline <svg onload> handler, which puts the
+ * element in the scope chain. SVGSVGElement has readonly x/y/width/height
+ * accessors, so an UNDECLARED variable of that name silently fails to assign.
+ * Wrapping in with(fakeSvg) reproduces that, catching it at build time.
+ */
+const SVG_READONLY = ['x', 'y', 'width', 'height'];
+
+function inSvgHandlerScope(code) {
+  const defs = SVG_READONLY
+    .map((p) => `Object.defineProperty(__s,'${p}',{get:()=>({baseVal:{value:0}}),configurable:true});`)
+    .join('');
+  return `var __s={};${defs}with(__s){(function(){eval(${JSON.stringify(code)})})()}`;
+}
+
+/** Never throws. Checks both execution contexts the build can emit. */
 function trySmokeTest(code) {
   try {
-    return { ok: true, info: smokeTest(code) };
+    const info = smokeTest(code);
+    try {
+      smokeTest(inSvgHandlerScope(code));
+    } catch (e) {
+      return { ok: false, error: `fails when eval'd from an inline handler (compeko): ${e.message}` };
+    }
+    return { ok: true, info };
   } catch (e) {
     return { ok: false, error: e.message };
   }

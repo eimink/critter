@@ -31,3 +31,6 @@ yarn-error.log*
 
 # machine-local Claude Code settings (shared settings.json stays tracked)
 .claude/settings.local.json
+
+# local browser-test builds
+test-*.html
