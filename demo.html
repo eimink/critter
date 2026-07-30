@@ -12,36 +12,123 @@ precision highp float;
 uniform vec2 T;   // T.x = seconds since start, T.y = birb tick
 uniform vec2 R;   // resolution
 
-float h(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
+const float E=0.001;
+const int STEPS=64;
+const float FAR=40.0;
+
+V glow=V(0.0);
+
+void rot(inout vec2 p, float a){
+    p=cos(a)*p+sin(a)*vec2(p.y,-p.x);
+}
+
+struct MarchResult{
+    float id;
+    float t;
+    V p;
+    V n;
+};
+
+float box(V position, V dimensions){
+    V b=abs(position)-dimensions;
+    return length(max(b,0.0))+min(max(b.x,max(b.y,b.z)),0.0);
+}
+
+vec2 opU(vec2 d1, vec2 d2){
+    return (d1.x<d2.x) ? d1 : d2;
+}
+
+vec2 scene(V p){
+    float fGlobalTime=T.x;
+    V pp=p, ppp=p;
+    vec2 res=vec2(1.,0.), res2=vec2(1.,0.), res3=vec2(1.,0.);
+    for(int ii=0;ii<32;ii++){
+        float i=float(ii);
+        rot(pp.xz,fGlobalTime*0.01);
+        rot(pp.zy,fGlobalTime*0.01);
+        float a=box(pp+V(cos(fGlobalTime+i),sin(fGlobalTime-i),15.0-i),V(1.0));
+        float b=box(pp+V(1.+sin(fGlobalTime+i),1.+sin(fGlobalTime-i),14.0-i),V(1.0));
+        float c=box(pp+V(2.+cos(fGlobalTime+i),2.+cos(fGlobalTime-i),13.0-i),V(1.0));
+        res=opU(res,opU(vec2(c,1.),opU(vec2(b,1.),vec2(a,1.))));
+
+        rot(ppp.zy,fGlobalTime*0.01);
+        rot(ppp.zx,fGlobalTime*0.01);
+        float d=box(ppp+V(cos(fGlobalTime+i),6.+sin(fGlobalTime-i),12.0-i),V(1.0));
+        float e=box(ppp+V(1.+sin(fGlobalTime+i),7.+sin(fGlobalTime-i),11.0-i),V(1.0));
+        float f=box(ppp+V(2.+cos(fGlobalTime+i),8.+cos(fGlobalTime-i),10.0-i),V(1.0));
+        res2=opU(res2,opU(vec2(d,2.),opU(vec2(e,2.),vec2(f,2.))));
+
+        rot(p.zy,fGlobalTime*0.01);
+        rot(p.xz,fGlobalTime*0.01);
+        float g=box(p+V(cos(fGlobalTime+i),12.+sin(fGlobalTime-i),9.0-i),V(1.0));
+        float hh=box(p+V(1.+sin(fGlobalTime+i),13.+sin(fGlobalTime-i),8.0-i),V(1.0));
+        float j=box(p+V(2.+cos(fGlobalTime+i),14.+cos(fGlobalTime-i),7.0-i),V(1.0));
+        res3=opU(res3,opU(vec2(j,3.),opU(vec2(hh,3.),vec2(g,3.))));
+    }
+    // beat pulse from the tick counter brightens the near ring on top of the shadertoy glow term
+    float pulse=exp(-fract(T.y*.25)*4.);
+    glow+=V(.85,.08,.45)*(0.0012+pulse*.002)/abs(res.x)+0.0001;
+    glow+=V(.02,.08,.45)*0.005/abs(res2.x)+0.001;
+    glow+=V(.4,.08,.4)*0.002/abs(res3.x)+0.0001;
+    return opU(res3,opU(res2,res));
+}
+
+V calcNormal(V pos){
+    vec2 e=vec2(0.00001,0.0);
+    return normalize(V(scene(pos+e.xyy).x-scene(pos-e.xyy).x,
+                        scene(pos+e.yxy).x-scene(pos-e.yxy).x,
+                        scene(pos+e.yyx).x-scene(pos-e.yyx).x));
+}
+
+MarchResult march(V ro, V rd){
+    float t=E;
+    float id=0.0;
+    V position=ro;
+    for(int i=0;i<STEPS;i++){
+        vec2 d=scene(position);
+        t+=d.x;
+        id=d.y;
+        position=ro+rd*t;
+        if(d.x<E||t>FAR) break;
+    }
+    MarchResult res;
+    res.t=t;
+    res.id=id;
+    res.p=position;
+    res.n=calcNormal(position);
+    return res;
+}
+
+V colorize(MarchResult m, V ld){
+    V col=V(0.0);
+    if(m.id==1.0) col=V(1.0,.2,.8)+clamp(dot(m.n,ld),0.0,1.0);
+    else if(m.id==2.0) col=V(0.2,0.2,1.0)+clamp(dot(m.n,ld),0.0,1.0);
+    else if(m.id==3.0) col=V(0.4,0.1,0.4)+clamp(dot(m.n,ld),0.0,.5);
+    return col;
+}
 
 void main(){
-    vec2 uv=(gl_FragCoord.xy*2.-R)/R.y;
-    float T0=T.x;
+    float fGlobalTime=T.x;
+    vec2 uv=gl_FragCoord.xy/R;
+    vec2 uvv=-1.0+2.0*uv;
+    uvv.x*=R.x/R.y;
 
-    // beat pulse from the tick counter
-    float pulse=exp(-fract(T.y*.25)*4.);
+    V rayOrigin=V(sin(fGlobalTime*.5)*10.,sin(fGlobalTime*2.)*2.-5.0,cos(fGlobalTime*.5)*20.-10.0);
+    V lookAt=V(0.0,-5.0,0.0);
 
-    // polar warp
-    float r=length(uv), a=atan(uv.y,uv.x);
-    a+=T0*.2+pulse*.3;
-    r=log(r+.001);
+    V z=normalize(lookAt-rayOrigin);
+    V x=normalize(cross(z,V(0.0,1.0,0.0)));
+    V y=normalize(cross(x,z));
 
-    // layered rings
-    float v=0.;
-    for(int i=0;i<4;i++){
-        float f=float(i)+1.;
-        v+=sin(r*6.*f-T0*1.5+a*3.)/f;
-    }
-    v=abs(v);
+    V rayDirection=normalize(mat3(x,y,z)*V(uvv,radians(60.00)));
+    V lightDirection=-rayDirection;
 
-    V col=mix(V(.05,.1,.25),V(1.,.5,.15),smoothstep(.1,.9,v));
-    col+=pulse*.35*V(.4,.6,1.);
-    col*=1.-r*.04;
+    V col=V(0.0);
+    MarchResult t=march(rayOrigin,rayDirection);
+    if(t.t<FAR) col=colorize(t,lightDirection);
 
-    // vignette + grain
-    col*=1.-.1*dot(uv,uv);
-    col+=(h(gl_FragCoord.xy+T0)-.5)*.04;
-
+    col=col+glow*0.01;
+    col=smoothstep(0.0,1.0,col);
     gl_FragColor=vec4(col,1.);
 }//*--`)
 c(s)
