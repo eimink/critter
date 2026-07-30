@@ -89,12 +89,23 @@ Flags are `--preserve-externals --aggressive-inlining`. The second makes the sha
 *bigger* and the final build ~10 b smaller, because repeated inlined constants compress
 better — measured on final size, which is the only metric that matters.
 
-Two constraints it imposes on your GLSL, both refusals rather than silent breakage:
+Constraints and known bugs in 1.5.1:
 
+- **Avoid structs.** It will rename a struct's *type* to a name it also gives a local
+  variable — `struct C{...}` plus `float …,C=sin(x);` — which doesn't compile. This shipped
+  as a black screen. `march` returns `vec2` with an `out` param instead of a struct.
 - **No struct field named `x/y/z/w`, `r/g/b/a` or `s/t/p/q`** — it can't safely rename a
-  field that looks like a swizzle, and errors out. A `MarchResult` with `t` and `p` fields
-  has to become e.g. `dist` and `pos`. Readable names cost nothing; it renames them anyway.
+  field that looks like a swizzle, and errors out (this one it catches).
 - Parse errors point at a line number in `build/shader.glsl`, the exact text it was given.
+
+Because both hazards produce a shader that *compiles nowhere*, the build runs
+`glslangValidator` on the shader before and after minification and fails on error —
+"before" blames your source, "after" blames the minifier. `brew install glslang`; without
+it the build warns and skips the check. The smoke test cannot substitute: its fake GL
+context always reports `COMPILE_STATUS: true`.
+
+Redistribution terms for the vendored binaries (Apache-2.0, MIT, BSD-2-Clause) are in
+[`tools/shader-minifier/THIRD-PARTY-NOTICES`](tools/shader-minifier/THIRD-PARTY-NOTICES).
 
 ## Music
 
