@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "node build.js demo.html",
+    "compeko": "node build.js demo.html --compeko",
     "dev": "node build.js demo.html --fast",
     "verify": "node verify.js build/payload.js",
     "check": "node build.js demo.html --fast && node verify.js build/payload.js"
