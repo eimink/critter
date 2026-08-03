@@ -1,4 +1,4 @@
-<body onclick="A||I()"><p id=C>click</p><canvas id=c></canvas><script src="song.js"></script><script>
+<body onclick="A||I()"><p id=C>></p><canvas id=c></canvas><script src="song.js"></script><script>
 // Q = render scale. CSS stretches the canvas to fill, so Q=2 renders quarter
 // the pixels and upscales. Drop to 1 for native once the shader is cheap enough.
 Q=2
@@ -8,7 +8,7 @@ c.style.cssText="position:fixed;left:0;top:0;width:100%;height:100%"
 C.style.cssText="font:12vw monospace;color:#fff;text-align:center"
 // `let` is required: undeclared x resolves to SVGSVGElement.x (readonly) when
 // the payload is eval'd from an inline handler, silently breaking every alias
-for(let x in (g=c.getContext("webgl2")))g[x[(t=A=0)]+x[6]]=g[x]
+for(let x in (g=c.getContext("webgl2")))g[x[(t=A=Y=0)]+x[6]]=g[x]
 with(g){
 // WebGL2 adds enough new methods that six of our x[0]+x[6] short names now
 // collide with something added in WebGL2 (createSampler vs createShader,
@@ -23,145 +23,231 @@ p=cP(g.c=compileShader,g.cS=createShader,g.gr=getAttribLocation,g.bf=bindBuffer,
 sS(s=cS(a=35632),"#version 300 es\n"+`//*--
 precision highp float;
 #define V vec3
-// fake rotation matrix (not orthonormal, just enough shear to break symmetry
-// in the glow field below) -- from the shadertoy "happy accident" this is
-// ported from; the 11/33 offsets are its magic, not ours
-#define r(a) mat2(cos(a-vec4(0,11,33,0)))
 
 uniform vec2 T;   // T.x = seconds since start, T.y = birb tick
 uniform vec2 R;   // resolution
 out vec4 FragColor;
 
-const float E=0.001;
-const int STEPS=80;
-const float FAR=60.0;
-// ticks in one full song loop (songSamples/spt = 604416/787 = 768 for the
-// current track), so every periodic motion below can be expressed as a
-// whole number of cycles per loop and land back exactly where it started
-// when the audio repeats. 768/24 = 32 beats/loop too -- re-derive both this
-// and pulse()'s divisor from song.js together whenever the track changes.
-const float TICKS_PER_LOOP=768.0;
+// beat grid. this song: bpm=180, tpr=6 -> 24 ticks/beat, and its whole loop is
+// 192 ticks = exactly 8 beats, so the build-up below resets with the music.
+// Re-derive from song.js if the track changes.
+const float TPB=24.0;
+const float BEATS=8.0;
+const int STEPS=96;
+const float FAR=100.0;
+const float STRIDE=2.0;    // beats per full leg cycle (a bar) -- keeps the gait
+                           // near the original 1.6s cadence at 180bpm
+const float TAU=6.2831853;
+const float TPL=TPB*BEATS;   // 192 ticks = one full song loop
+const float CAMLOOPS=2.0;    // hold each camera for two loops
+const int NCAM=12;
+
+// Shot list. Flock at full build-up spans x -30..1.9, z +-22, so wide shots aim
+// at its middle (x=-14). 12 shots x 2 loops = 63.9s, loop-locked to the music.
+//  0 pulled back from the original start   6  near-orthographic from ahead
+//  1 wide, all rows in frame               7  wide, mirrored
+//  2 top-down                              8  high, from behind
+//  3 close-up on the lead duck's face      9  near-orthographic from behind
+//  4 close-up on the marching feet        10  low front
+//  5 far behind, whole flock              11  high three-quarter
+const V CAMS[12]=V[12](
+    V(4.5,3.,4.5),   V(20.,13.,28.),  V(-6.,46.,0.),
+    V(3.4,1.2,1.1),  V(2.4,-.7,1.5),  V(-64.,14.,0.),
+    V(52.,6.,0.),    V(20.,13.,-28.), V(-58.,30.,-18.),
+    V(-80.,10.,0.),  V(5.,.8,5.),     V(24.,34.,26.)
+);
+const V CAMT[12]=V[12](
+    V(0.),           V(-14.,0.,0.),   V(-14.,0.,0.),
+    V(1.3,.8,0.),    V(.2,-1.25,0.),  V(-14.,0.,0.),
+    V(-14.,0.,0.),   V(-14.,0.,0.),   V(-14.,0.,0.),
+    V(-14.,0.,0.),   V(0.,.2,0.),     V(-14.,0.,0.)
+);
+
+// haze: geometry fades into it instead of cutting to black at the far plane
+const V FOG=V(.06,.07,.1);
+const float FOGN=65.0;    // starts here, complete at FAR
+
+// city
+const float GY=-1.5;      // ground level, at the ducks' feet
+const float CGRID=14.0;   // block spacing along the direction of travel
+const float CLANE=34.0;   // |z| of the two building lanes (flock reaches +-23)
+const float CSPEED=2.0;   // world units per beat the city streams past
+
+// flock spacing
+const float SPX=4.0;       // between rows, back along -x
+const float SPZ=3.0;       // between ducks across a row
+
+// duck tuning
+const float LLEN=.4;
+const float LSPREAD=.4;
+const float WSTRIDE=.2;
+
+// set once per pixel in main(), read by sdf()
+float NX, WALK, SCROLL;
+
+float sdBox(V p, V b){
+    V q=abs(p)-b;
+    return length(max(q,0.))+min(max(q.x,max(q.y,q.z)),0.);
+}
 
 void rot(inout vec2 p, float a){
     p=cos(a)*p+sin(a)*vec2(p.y,-p.x);
 }
 
-float box(V position, V dimensions){
-    V b=abs(position)-dimensions;
-    return length(max(b,0.0))+min(max(b.x,max(b.y,b.z)),0.0);
-}
-
 vec2 opU(vec2 d1, vec2 d2){
-    return d1.x<d2.x ? d1 : d2;
+    return d1.x<d2.x?d1:d2;
 }
 
-// beat pulse from the tick counter -- shared with the box scale below.
-// this song: tpr=6, kick every 4 rows -> 24 ticks/beat (checks out against
-// its bpm=140: 24*787 samples / 44100 = 0.4283s = 140.1 bpm). Re-derive this
-// divisor from song.js whenever the track changes -- it's not derivable from
-// T.y alone.
-float pulse(){
-    return exp(-fract(T.y/24.0)*4.);
+// Two rows of blocks flanking the corridor, streaming past to sell the motion.
+// Mirroring in z and repeating in x are both exact, so unlike a masked grid this
+// stays a real distance field -- no leaking.
+float city(V p){
+    float lane=sign(p.z);
+    float z=abs(p.z)-CLANE;
+    p.x+=SCROLL;
+    float ix=floor(p.x/CGRID+.5);
+    p.x-=ix*CGRID;
+    float h=7.+fract(sin(ix*91.7+lane*13.3)*3e4)*22.;
+    return sdBox(V(p.x,p.y-(GY+h*.5),z),V(4.,h*.5,4.));
 }
 
-vec2 scene(V p){
-    float pl=1.0+pulse()*.15;
-    float lp=fract(T.y/TICKS_PER_LOOP);   // 0->1 once per song loop, exactly
+// one duck, at the origin
+vec2 one(V p){
+    V pp=p;
 
-    // three small cubes orbiting a common center, hovering at a fixed
-    // distance from the camera. Angles are lp*tau*N (whole N) instead of
-    // T.x*speed so the motion completes a whole number of turns per loop
-    // and lines back up with itself when the song repeats.
-    V rel=p-V(0.0,0.0,3.5);
-    vec2 res=vec2(1e5,0.0);
-    for(int i=0;i<3;i++){
-        float fi=float(i);
-        float ang=lp*6.283185307*2.0+fi*2.0943951;   // 2 orbits/loop, 2pi/3 apart
-        V pi=rel-V(cos(ang),sin(ang),0.0)*.3;
-        rot(pi.xy,lp*6.283185307*(3.0+fi*2.0));       // 3/5/7 spins per loop
-        res=opU(res,vec2(box(pi,V(.2*pl)),fi+1.0));
+    pp=pp-V(1.+sin(WALK*2.)*.02,.7,0.);
+    float head=sdBox(pp,V(.5,.4,.5));
+    V ppp=pp-V(.7,-.1,0.);
+    float beak=sdBox(ppp,V(.2,.08,.2));
+    pp.z=abs(pp.z);
+    pp=pp-V(.5,.2,.3);
+    float eyes=sdBox(pp,V(.1,.1,.1));
+
+    vec2 h=opU(vec2(eyes,1.),opU(vec2(beak,2.),vec2(head,3.)));
+
+    pp=p;
+    rot(pp.xz,-sin(WALK)*.1);
+    float body=sdBox(pp,V(1.,.6,.8));
+    pp=pp-V(-1.1+sin(WALK*2.)*.02,.7,0.);
+    rot(pp.xz,sin(WALK)*.1);
+    float tail=sdBox(pp,V(.4,.1,.6));
+    body=min(tail,body);
+    vec2 b=opU(vec2(body,3.),h);
+
+    pp=p;
+    rot(pp.xy,sin(WALK)*WSTRIDE);
+    pp=pp-V(0.,-1.,LSPREAD);
+    float lleg=sdBox(pp,V(.1,LLEN,.2));
+    lleg=min(lleg,sdBox(pp-V(.2,-LLEN,0.),V(.4,.1,.2)));
+
+    pp=p;
+    rot(pp.xy,-sin(WALK)*WSTRIDE);
+    pp=pp-V(0.,-1.,-LSPREAD);
+    float rleg=sdBox(pp,V(.1,LLEN,.2));
+    rleg=min(rleg,sdBox(pp-V(.2,-LLEN,0.),V(.4,.1,.2)));
+    float legs=min(lleg,rleg);
+
+    return opU(vec2(legs,2.),b);
+}
+
+vec2 sdf(V p){
+    // Evaluate the two cells straddling p on each axis, not just the nearest.
+    // Ducks are 3.4 long in a 4-unit cell, so folding to one cell overestimates
+    // the distance to a neighbour by up to 25x near the surface and rays step
+    // clean through it.
+    vec2 d=vec2(1e5,0.);
+    for(int i=0;i<2;i++){
+        float rx=clamp(floor(p.x/SPX)+float(i),-NX,0.);
+        float nz=-rx;
+        V q=p; q.x-=rx*SPX;
+        for(int j=0;j<2;j++){
+            float jz=clamp(floor(q.z/SPZ)+float(j),-nz,nz);
+            V u=q; u.z-=jz*SPZ;
+            d=opU(d,one(u));
+        }
     }
-    return res;
+    return opU(opU(vec2(p.y-GY,4.),vec2(city(p),5.)),d);
+}
+
+// returns vec4(hit position, id). No struct: Shader Minifier 1.5.1 reuses a
+// struct's type name for a local variable and emits a shader that won't compile.
+vec4 march(V ro, V rd, inout float t){
+    V p=ro+rd;
+    float id=0.;
+    for(int i=0;i<STEPS;i++){
+        vec2 d=sdf(p);
+        // understep: clamped domain repetition can report a distance larger than
+        // the true nearest duck, so a full step grazes/leaks through neighbours
+        float s=d.x*.85;
+        t+=s;
+        p+=rd*s;
+        id=d.y;
+        if(d.x<.008||t>FAR) break;
+    }
+    return vec4(p,id);
+}
+
+V color(float id, V p, V n){
+    if(id==1.) return V(.1);
+    else if(id==2.) return V(.8,.3,.2);
+    else if(id==3.) return V(.8,.7,.4);
+    else if(id==4.) return V(.22);
+    else if(id==5.){
+        // repeat the along-wall coordinate to get a window grid. pick x or z by
+        // which face we hit so the grid runs across the wall, not along it.
+        vec2 uv=vec2(abs(n.z)>.5?p.x+SCROLL:p.z,p.y-GY)/vec2(2.,2.8);
+        vec2 f=fract(uv);
+        float pane=step(.2,f.x)*step(f.x,.8)*step(.25,f.y)*step(f.y,.8);
+        float lit=step(.62,fract(sin(dot(floor(uv),vec2(19.3,7.7)))*4e4));
+        return mix(V(.38,.37,.35),lit>.5?V(1.,.9,.6):V(.05,.06,.09),pane);
+    }
+    return V(0);
 }
 
 V calcNormal(V pos){
-    vec2 e=vec2(0.001,0.0);
-    return normalize(V(scene(pos+e.xyy).x-scene(pos-e.xyy).x,
-                        scene(pos+e.yxy).x-scene(pos-e.yxy).x,
-                        scene(pos+e.yyx).x-scene(pos-e.yyx).x));
-}
-
-// returns vec2(distance,id) and writes the hit position; no struct, because
-// Shader Minifier 1.5.1 will reuse a struct's type name for a local variable
-vec2 march(V ro, V rd, out V pos){
-    float t=E;
-    float id=0.0;
-    pos=ro;
-    for(int i=0;i<STEPS;i++){
-        vec2 d=scene(pos);
-        t+=d.x;
-        id=d.y;
-        pos=ro+rd*t;
-        if(d.x<E||t>FAR) break;
-    }
-    return vec2(t,id);
+    vec2 e=vec2(.00001,0.);
+    return normalize(V(sdf(pos+e.xyy).x-sdf(pos-e.xyy).x,
+                       sdf(pos+e.yxy).x-sdf(pos-e.yxy).x,
+                       sdf(pos+e.yyx).x-sdf(pos-e.yyx).x));
 }
 
 void main(){
-    vec2 uv=(gl_FragCoord.xy-.5*R)/R.y;
-    V rd=normalize(V(uv,1.0));
+    // beat 0: one duck. beat 1: a row of three. from beat 2 a further row
+    // falls in behind on every beat, through beat 7, then the loop restarts.
+    float stage=mod(floor(T.y/TPB),BEATS);
+    NX=stage;   // one more row falls in behind on every beat; each is 2 wider
+    WALK=T.y/(TPB*STRIDE)*TAU;
+    SCROLL=T.y*CSPEED/TPB*CGRID;
 
-    V hitPos;
-    vec2 hit=march(V(0.0),rd,hitPos);
+    int ci=int(mod(floor(T.y/TPL/CAMLOOPS),float(NCAM)));
+    V cp=CAMS[ci];
+    V ct=CAMT[ci];
+    // focal length: bigger = narrower. 7 and 13 are the near-orthographic pair.
+    float fov=(ci==6||ci==9)?4.:1.5708;
+    V ld=V(-2.,.5,2.);
 
-    // iridescent glow tunnel behind the cubes. Started as a ported shadertoy
-    // "happy accident" (layered sine ripples folded through a fake rotation
-    // matrix, tonemapped through tanh); made it ours by wiring the fractal
-    // fold, the tunnel path, and the color cycling all to the birb beat
-    // pulse, and by locking its forward scroll to the song's loop length
-    // instead of raw seconds so it closes cleanly when the audio repeats.
-    float pu=pulse();
-    float lp=fract(T.y/TICKS_PER_LOOP);
-    float scroll=lp*8.0*3.14159265;   // 8 half-cycles/loop -- a multiple of
-                                      // pi, a safe wrap point for every
-                                      // harmonic in the fold below
-    V pos=V(0.0),warp;
-    float iter=0.,dist=0.,de=1.,freq;
-    vec4 glow=vec4(0.0);
+    vec2 q=-1.+2.*(gl_FragCoord.xy/R);
+    q.x*=R.x/R.y;
 
-    for(;iter<99.&&de>1e-4;iter+=1.0){
-        glow+=(1.0+sin(3.0*length(pos.xy*3.0)+vec4(2,1,0,0)+pu*1.5))/190.0;
+    V cf=normalize(ct-cp);
+    V cr=normalize(cross(V(0.,1.,0.),cf));
+    V cu=normalize(cross(cf,cr));
 
-        dist+=de*.4;
-        pos=V(uv*dist,dist);
-        pos.z+=scroll;
-        // the tunnel path breathes wider on the beat
-        de=2.0-length(pos.xy-vec2(sin(pos.z*.3),cos(pos.z*.3))*(.3+pu*.2));
+    V rd=normalize(mat3(cr,cu,cf)*V(q,fov));
 
-        float flip=1.0;
-        for(freq=2.0;freq<3e2;freq+=freq){
-            warp=pos*freq;
-            warp.xz*=r(freq+pu*1.2);   // beat kicks the fold's shear
-            de-=flip*abs(dot(sin(warp),V(1.0)))/(freq*1.2);
-            flip*=-.75;
-        }
+    float t=0.;
+    vec4 m=march(cp,rd,t);
+
+    V col=FOG;
+    if(t<FAR){
+        V n=calcNormal(m.xyz);
+        col=color(m.w,m.xyz,n)+clamp(dot(n,ld),0.,1.)*.1;
     }
+    col=mix(col,FOG,smoothstep(FOGN,FAR,t));
 
-    glow+=12.0/iter;
-    glow=0.2/tanh(glow*glow)/vec4(3,2,1,0)*6.0/dist;
-
-    V col=glow.rgb;
-    if(hit.x<dist){
-        V n=calcNormal(hitPos);
-        V ld=normalize(V(.5,.8,-.4));
-        float diff=clamp(dot(n,ld),0.0,1.0)+.15;
-        if(hit.y<1.5) col=V(1.0,.2,.8)*diff;
-        else if(hit.y<2.5) col=V(.2,.2,1.0)*diff;
-        else col=V(.95,.6,.2)*diff;
-    }
-
-    FragColor=vec4(col,1.0);
-}//*--`)
+    FragColor=vec4(col,1.);
+}
+//*--`)
 c(s)
 // -- dev start
 if(!g.getShaderParameter(s,g.COMPILE_STATUS)){
@@ -203,12 +289,27 @@ I=()=>{
     F()
 }
 
-// seconds + birb tick to the shader
+// seconds + birb tick to the shader. Z holds the pending frame so ESC can cancel it.
 F=()=>{
     t=A.currentTime-D;
     uniform2f(U,t,t*44100/m.spt);
     dr(4,0,3);
-    requestAnimationFrame(F)
+    Z=requestAnimationFrame(F)
 }
+
 }
+
+// Stop everything and hand the page back. Idempotent (Y latches).
+// Must live OUTSIDE with(g) -- in there `c` resolves to g.c, which the alias
+// line above sets to compileShader, not the canvas.
+X=()=>{
+    if(!A||Y)return;
+    Y=1;
+    cancelAnimationFrame(Z);
+    S.stop();
+    A.close();
+    c.remove();
+    document.body.style.cursor=""
+}
+onkeydown=e=>{e.key=="Escape"&&X()}
 </script>
